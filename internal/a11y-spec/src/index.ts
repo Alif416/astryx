@@ -100,6 +100,11 @@ export {
   type ModalDialogStateFacts,
 } from './patterns/modal-dialog';
 
+export {
+  STATUS_MESSAGE_PATTERN,
+  type StatusMessageStateFacts,
+} from './patterns/status-message';
+
 export {saysInOrder, spokenWords} from './spoken';
 
 export {BUTTON_PATTERN, type ButtonStateFacts} from './patterns/button';

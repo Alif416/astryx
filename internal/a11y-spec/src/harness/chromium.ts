@@ -97,6 +97,8 @@ interface AxProperty {
 }
 
 interface AxNode {
+  readonly nodeId?: string;
+  readonly childIds?: readonly string[];
   readonly ignored?: boolean;
   readonly role?: AxValue;
   readonly name?: AxValue;
@@ -113,6 +115,24 @@ function text(value: AxValue | undefined): string {
 function property(node: AxNode, name: string): unknown {
   return node.properties?.find(candidate => candidate.name === name)?.value
     ?.value;
+}
+
+function accessibleText(nodes: readonly AxNode[], root: AxNode): string {
+  const byId = new Map(
+    nodes.flatMap(node =>
+      node.nodeId == null ? [] : [[node.nodeId, node] as const],
+    ),
+  );
+  const visit = (node: AxNode): string => {
+    if (node.ignored !== true && text(node.role) === 'StaticText') {
+      return text(node.name);
+    }
+    return (node.childIds ?? [])
+      .map(id => byId.get(id))
+      .flatMap(child => (child == null ? [] : [visit(child)]))
+      .join(' ');
+  };
+  return visit(root).replace(/\s+/g, ' ').trim();
 }
 
 function flag(node: AxNode, name: string): boolean {
@@ -173,7 +193,7 @@ async function computedNode(
 
     const {nodes} = (await cdp.send('Accessibility.getPartialAXTree', {
       nodeId,
-      fetchRelatives: false,
+      fetchRelatives: true,
     })) as unknown as {nodes: readonly AxNode[]};
 
     const node = nodes[0];
@@ -183,7 +203,14 @@ async function computedNode(
         role: null,
         name: '',
         description: '',
+        accessibleText: '',
+        live: null,
+        atomic: null,
         value: null,
+        rangeValue: null,
+        rangeMin: null,
+        rangeMax: null,
+        valueText: null,
         modal: null,
         multiline: null,
         readOnly: null,
@@ -195,6 +222,24 @@ async function computedNode(
     }
 
     const role = text(node.role);
+    let textNodes = nodes;
+    let textRoot = node;
+    if (
+      (role === 'status' || role === 'alert') &&
+      node.backendDOMNodeId != null
+    ) {
+      const full = (await cdp.send(
+        'Accessibility.getFullAXTree',
+      )) as unknown as {nodes: readonly AxNode[]};
+      const fullRoot = full.nodes.find(
+        candidate => candidate.backendDOMNodeId === node.backendDOMNodeId,
+      );
+      if (fullRoot != null) {
+        textNodes = full.nodes;
+        textRoot = fullRoot;
+      }
+    }
+    const live = property(node, 'live');
     const checked = property(node, 'checked');
     const invalid = property(node, 'invalid');
     const exposedValue = node.value?.value;
@@ -203,12 +248,31 @@ async function computedNode(
       role: role === '' ? null : role,
       name: text(node.name),
       description: text(node.description),
+      accessibleText: accessibleText(textNodes, textRoot),
+      live:
+        live === 'off' || live === 'polite' || live === 'assertive'
+          ? live
+          : null,
+      atomic: optionalFlag(node, 'atomic'),
       value:
         typeof exposedValue === 'string'
           ? exposedValue
           : role === 'textbox'
             ? ''
             : null,
+      rangeValue: typeof exposedValue === 'number' ? exposedValue : null,
+      rangeMin:
+        typeof property(node, 'valuemin') === 'number'
+          ? (property(node, 'valuemin') as number)
+          : null,
+      rangeMax:
+        typeof property(node, 'valuemax') === 'number'
+          ? (property(node, 'valuemax') as number)
+          : null,
+      valueText:
+        typeof property(node, 'valuetext') === 'string'
+          ? (property(node, 'valuetext') as string)
+          : null,
       modal: optionalFlag(node, 'modal'),
       multiline: optionalFlag(node, 'multiline'),
       readOnly: optionalFlag(node, 'readonly'),
@@ -271,6 +335,11 @@ export function createChromiumHarness(
 ): Harness {
   const {page, subject: locator, pointerTarget, cdp, visibleLabel} = options;
   const pointerLocator = pointerTarget ?? locator;
+  let initialElement: ReturnType<Locator['elementHandle']> | undefined;
+  const capturedElement = () => {
+    initialElement ??= locator.elementHandle();
+    return initialElement;
+  };
   const pointerTargets = new WeakMap<Subject, Locator>();
 
   const subject: Subject = {
@@ -425,6 +494,15 @@ export function createChromiumHarness(
         }
         return null;
       }),
+    textContent: () =>
+      locator.evaluate(node =>
+        (node.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      ),
+    currentExists: async () => (await locator.count()) > 0,
+    isConnected: async () => {
+      const element = await capturedElement();
+      return element != null && element.evaluate(node => node.isConnected);
+    },
     computed: () => computedNode(cdp, locator),
     visibleLabelText: async () => {
       if (visibleLabel === null) {
@@ -724,6 +802,12 @@ export function createChromiumHarness(
           }
           return null;
         }),
+      textContent: () =>
+        related.evaluate(node =>
+          (node.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        ),
+      currentExists: async () => (await related.count()) > 0,
+      isConnected: () => related.evaluate(node => node.isConnected),
       computed: () => computedNode(cdp, related),
       visibleLabelText: async () => {
         const value = (await related.innerText()).trim();
