@@ -6,8 +6,7 @@ import {useRef, useState} from 'react';
 import * as stylex from '@stylexjs/stylex';
 import {BaseTypeahead, createStaticSource} from '@astryxdesign/core/Typeahead';
 import type {SearchableItem} from '@astryxdesign/core/Typeahead';
-import {Icon} from '@astryxdesign/core/Icon';
-import {HStack, VStack} from '@astryxdesign/core/Layout';
+import {VStack} from '@astryxdesign/core/Layout';
 import {Text} from '@astryxdesign/core/Text';
 import {
   borderVars,
@@ -16,17 +15,11 @@ import {
   radiusVars,
   spacingVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
-import {MagnifyingGlassIcon} from '@heroicons/react/24/outline';
 
 const frameworks: SearchableItem[] = [
-  {id: 'react', label: 'React'},
-  {id: 'vue', label: 'Vue'},
-  {id: 'angular', label: 'Angular'},
-  {id: 'svelte', label: 'Svelte'},
-  {id: 'solid', label: 'SolidJS'},
-  {id: 'remix', label: 'Remix'},
-  {id: 'next', label: 'Next.js'},
-  {id: 'nuxt', label: 'Nuxt'},
+  {id: 'react', label: 'React', auxiliaryData: {category: 'UI library'}},
+  {id: 'remix', label: 'Remix', auxiliaryData: {category: 'Web framework'}},
+  {id: 'next', label: 'Next.js', auxiliaryData: {category: 'Web framework'}},
 ];
 
 const source = createStaticSource(frameworks);
@@ -55,16 +48,18 @@ const styles = stylex.create({
       ':has(input:focus-visible)': focusVars['--focus-outline-width'],
     },
   },
+  result: {
+    minWidth: 0,
+  },
 });
 
-export default function BaseTypeaheadCustomSearch() {
+export default function BaseTypeaheadCustomResults() {
   const [value, setValue] = useState<SearchableItem | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   return (
     <VStack gap={3} xstyle={styles.root}>
-      <HStack ref={wrapperRef} gap={2} vAlign="center" xstyle={styles.field}>
-        <Icon icon={MagnifyingGlassIcon} size="sm" color="secondary" />
+      <div ref={wrapperRef} {...stylex.props(styles.field)}>
         <BaseTypeahead
           aria-label="Search frameworks"
           searchSource={source}
@@ -74,11 +69,19 @@ export default function BaseTypeaheadCustomSearch() {
           placeholder="Search frameworks…"
           hasEntriesOnFocus
           debounceMs={0}
+          renderItem={item => (
+            <VStack gap={0} xstyle={styles.result}>
+              <Text type="label">{item.label}</Text>
+              <Text type="supporting" color="secondary">
+                {
+                  (item.auxiliaryData as {category?: string} | undefined)
+                    ?.category
+                }
+              </Text>
+            </VStack>
+          )}
         />
-      </HStack>
-      <Text type="supporting" color="secondary">
-        {value != null ? `Selected: ${value.label}` : 'No selection'}
-      </Text>
+      </div>
     </VStack>
   );
 }
